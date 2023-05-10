@@ -5,6 +5,9 @@ const LocalStrategy = require('passport-local').Strategy;
 const session = require('express-session');
 var jwt = require('jsonwebtoken');
 const asyncHandler = require("../services/asyncHandler");
+const sendEmail = require("../utils/sendEmail")
+const { default: CustomError } = require("../utils/customError");
+const crypto = require("crypto")
 
    const cookieOptions = {
     expires:new Date(Date.now() + 3 * 24 * 60 *60 *1000),
@@ -133,7 +136,7 @@ exports.login=async(req,res)=>{
 
 
 //logout
-exports.logout = asyncHandler(async(req,res)=>{
+exports.logout = asyncHandler(async(_req,res)=>{
         res.cookie('accessToken', null , {
           expires:new Date(Date.now()),
           httpOnly:true
@@ -143,4 +146,89 @@ exports.logout = asyncHandler(async(req,res)=>{
           success:true,
           message:"Logged Out successfully"
         })
+})
+
+
+exports.forgotPassword = asyncHandler(async(req,res)=>{
+     const {email} = req.body;
+     if(!email){
+      throw new CustomError('please enter email' , 404)
+     }
+     const user = await User.findOne({email});
+     if(!user){
+      throw new CustomError('user not found' , 404)
+     }
+
+     const resetToken = user.generateForgotPasswordToken();
+     await user.save({
+      validateBeforeSave:false
+     });
+
+     const resetUrl = `${req.protocol}://${req.get("host")}/api/v1/password/reset${resetToken}`
+
+
+     const text = `your password reset url is \n\n ${resetUrl} \n\n`
+     try {
+      await sendEmail({
+        email:user.email ,
+        subject: "Password reset for ecommerce" ,
+        text:text
+      })
+      res.status(200).json({
+        success:true,
+        message:`email send to ${user.email}`
+      })
+     } catch (error) {
+      //roll back - clear fields and save
+      user.forgotPasswordToken = undefined
+      user.forgotPasswordExpiry= undefined
+
+      await user.save({validateBeforeSave:false})
+      throw new CustomError(err.message || "fail to send Email" , 500)
+
+      
+     }
+});
+
+exports.resetPassword = asyncHandler
+(async(req,res)=>{
+    const {token : resetToken} = req.params
+    const{password , confirmPassword} = req.body
+   const resetPasswordToken =  crypto.createHash('sha256')
+    .update(resetToken).digest('hex')
+
+    const user =  await User.findOne({forotPasswordToken:resetPasswordToken,
+    forgotPasswordExpiry:{
+      $gt:Date.now()
+    }
+    
+    })
+
+    
+    if(!user){
+      throw new CustomError('Password token is invalid or expired' , 400) 
+    }
+
+    if(password !== confirmPassword){
+      throw new CustomError('password does not match' , 400)
+    }
+
+    user.password = password
+    user.forgotPasswordToken = undefined
+    user.forgotPasswordExpiry = undefined
+    const salt = await bcrypt.genSalt(10);
+    const hashedPassword = await bcrypt.hash(user.password, salt);
+    const resetUser = new User({
+      password: hashedPassword
+   });
+
+    await user.save()
+    const token = user.getJwtToken()
+    user.password = undefined
+
+    res.cookie("token"  , token , cookieOptions)
+    res.status(200).json({
+      success:true,
+      user
+    })
 })
