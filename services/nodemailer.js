@@ -1,4 +1,4 @@
-import nodemailer from "nodemailer"
+const nodemailer = require("nodemailer")
 
 let transporter = nodemailer.createTransport({
     host: process.env.SMPT_HOST,

@@ -1,4 +1,4 @@
-import transporter from "../services/nodemailer";
+const transporter = require("../services/nodemailer") ;
 
 let sendEmail =async(options)=>{
     const message = {
